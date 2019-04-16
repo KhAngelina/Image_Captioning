@@ -1,14 +1,11 @@
-from os import listdir
 from pickle import dump
 import csv
-from keras.applications.vgg16 import VGG16
-
+import requests
+import io
 from keras.applications.mobilenet_v2 import MobileNetV2
-
 from keras.preprocessing.image import load_img
 from keras.preprocessing.image import img_to_array
-from keras.applications.vgg16 import preprocess_input
-from keras.models import Model
+from keras.applications.mobilenet_v2 import preprocess_input
 from pathlib import Path
 
 
@@ -18,70 +15,41 @@ def dataset_loading(path_to_data):
         for row in data:
             yield row[1]
 
+
 # extract features from each photo in the directory
 def extract_pic_features(pics):
     # load the model
     model = MobileNetV2(weights='imagenet', input_shape=(224, 224, 3), alpha=1.0, pooling='avg', include_top=False)
 
+    headers = {"Accept-Language": "en-US,en;q=0.5"}
+
     features = dict()
     for pic in pics:
-        print(model.summary())
+        pic = 'https://www.papercitymag.com/wp-content/uploads/2017/06/Menil-40-680x1024.jpg'
 
-        image = load_img(pic, target_size=(224, 224))
+        # try:
+        data_img = requests.get(pic, headers=headers).content
+        # print(model.summary())
+        image = load_img(io.BytesIO(data_img), target_size=(224, 224))
+        # except OSError:
+        #     print("Skip: ", pic)
+        #     continue
         image = img_to_array(image)
+
         image = image.reshape((1, image.shape[0], image.shape[1], image.shape[2]))
         image = preprocess_input(image)
         feature = model.predict(image, verbose=0)
-
-        features[pic] = feature
-        print(feature.shape)
-        print(feature)
-
-    # # load the model
-    # model = VGG16()
-    # # re-structure the model
-    # model.layers.pop()
-    # model = Model(inputs=model.inputs, outputs=model.layers[-1].output)
-    # # summarize
-    # print(model.summary())
-    # # extract features from each photo
-    # features = dict()
-    # for pic in pics:
-    #     # load an image from file
-    #     image = load_img(pic, target_size=(224, 224))
-    #     # convert the image pixels to a numpy array
-    #     image = img_to_array(image)
-    #     # reshape data for the model
-    #     image = image.reshape((1, image.shape[0], image.shape[1], image.shape[2]))
-    #     # prepare the image for the VGG model
-    #     image = preprocess_input(image)
-    #     # get features
-    #     feature = model.predict(image, verbose=0)
-    #     # get image id
-    #     image_id = pic
-    #     # store feature
-    #     features[image_id] = feature
-    #     print(image_id)
-    #     print(features[image_id])
+        features[pic] = feature[0]
     return features
 
 
 if __name__ == '__main__':
     print("Extract features")
-    # # extract features from all images
-    # directory = 'C:\\Angelina_caption_generation\\Flickr8k_Dataset'
-    #
-    # photos_dir = Path('C:\\akharche\\UserPreferenceAnalysis\\user_profile')
-    # imgs = get_images_all(photos_dir)
-    #
-    # features = extract_pic_features(imgs)
-    # print('Extracted Features: %d' % len(features))
-    # # save to file
-    # dump(features, open('C:\\akharche\\UserPreferenceAnalysis\\data\\user_profile_vgg16_features.pkl', 'wb'))
-
-    img_directory = Path('..\\Google_dataset\\Train_GCC-training.tsv')
-    print(img_directory)
-
-    # dataset_loading(img_directory)
-    extract_pic_features(img_directory)
+    # extract features from all images
+    img_directory = Path('.\\Google_dataset\\Train_GCC-training.tsv')
+    dataset = dataset_loading(img_directory)
+    features = extract_pic_features(dataset)
+    print('Extracted Features: %d' % len(features))
+    # save to file
+    dump(features, open('.\\google_mobilenetv2_features.pkl', 'wb'))
 
