@@ -12,6 +12,14 @@ def dataset_loading(path_to_data):
         for string_number, row in enumerate(data):
             yield string_number, row[1]
 
+def pics_mapping(path_to_data, data_gen):
+    with path_to_data.open('w', encoding='utf-8') as fr:
+        for i, row in data_gen:
+            s = (',').join([str(i), row, '\n'])
+            fr.write(s)
+
+
+
 def download(dataset, path_to_save):
     for string_number, url in dataset:
         # print(url)
@@ -34,5 +42,10 @@ if __name__ == '__main__':
 
     path_to_save = Path('C:\\Angelina_caption_generation\\Image_Captioning\\Google_Train\\')
     img_directory = Path('.\\Google_dataset\\Train_GCC-training.tsv')
+
+    path_to_data = Path('images_mapping_train.csv')
     dataset = dataset_loading(img_directory)
-    download(dataset, path_to_save)
+    pics_mapping(path_to_data, dataset)
+
+    # dataset = dataset_loading(img_directory)
+    # download(dataset, path_to_save)
