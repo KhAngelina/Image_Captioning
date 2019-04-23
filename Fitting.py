@@ -1,5 +1,7 @@
+import csv
 from numpy import array
 from pickle import load
+from pathlib import Path
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.utils import to_categorical
@@ -41,55 +43,38 @@ def load_set(filename):
 
 
 # load clean descriptions into memory
-def load_clean_descriptions(filename, dataset):
-    # load document
-    doc = load_doc(filename)
+def load_clean_descriptions(filename):
     descriptions = dict()
-    for line in doc.split('\n'):
-        # split line by white space
-        tokens = line.split()
-        # split id from description
-        image_id, image_desc = tokens[0], tokens[1:]
-        # skip images not in the set
-        if image_id in dataset:
-            # create list
-            if image_id not in descriptions:
-                descriptions[image_id] = list()
-            # wrap description in tokens
-            desc = 'startseq ' + ' '.join(image_desc) + ' endseq'
-            # store
-            descriptions[image_id].append(desc)
+    with filename.open('r', encoding='utf-8') as csvreader:
+        data = csv.reader(csvreader, delimiter=',')
+        for row in data:
+            image_id = row[0]
+            image_desc = row[1].split()
+            descriptions[image_id] = 'startseq ' + ' '.join(image_desc) + ' endseq'
     return descriptions
 
 
 # load photo features
-def load_photo_features(filename, dataset):
-    # load all features
-    all_features = load(open(filename, 'rb'))
-    # filter features
-    features = {k: all_features[k] for k in dataset}
-    return features
+def load_photo_features(filename):
+    # load photo features from file
+    with filename.open('r', encoding='utf-8') as csvreader:
+        data = csv.reader(csvreader, delimiter=',')
+        features = {row[0]: row[1:] for row in data}
 
-
-# covert a dictionary of clean descriptions to a list of descriptions
-def to_lines(descriptions):
-    all_desc = list()
-    for key in descriptions.keys():
-        [all_desc.append(d) for d in descriptions[key]]
-    return all_desc
+        return features
 
 
 # fit a tokenizer given caption descriptions
 def create_tokenizer(descriptions):
-    lines = to_lines(descriptions)
+    all_desc = list(descriptions.values())
     tokenizer = Tokenizer()
-    tokenizer.fit_on_texts(lines)
+    tokenizer.fit_on_texts(all_desc)
     return tokenizer
 
 
 # calculate the length of the description with the most words
 def max_length(descriptions):
-    lines = to_lines(descriptions)
+    lines = list(descriptions.values())
     return max(len(d.split()) for d in lines)
 
 
@@ -117,10 +102,12 @@ def create_sequences(tokenizer, max_length, desc_list, photo):
 
 # define the captioning model
 def define_model(vocab_size, max_length):
+
     # feature extractor model
-    inputs1 = Input(shape=(4096,))
+    inputs1 = Input(shape=(1280,))
     fe1 = Dropout(0.5)(inputs1)
     fe2 = Dense(256, activation='relu')(fe1)
+
     # sequence model
     inputs2 = Input(shape=(max_length,))
     se1 = Embedding(vocab_size, 256, mask_zero=True)(inputs2)
@@ -152,30 +139,33 @@ def data_generator(descriptions, photos, tokenizer, max_length):
 
 if __name__ == '__main__':
     # load training dataset (6K)
-    filename = 'C:\\Angelina_caption_generation\\Flickr8k_text\\Flickr_8k.trainImages.txt'
-    train = load_set(filename)
-    print('Dataset: %d' % len(train))
-    # descriptions
-    train_descriptions = load_clean_descriptions('descriptions.txt', train)
+    file_train_descriptions = Path('./Google_dataset/train_clear_descr.csv')
+    file_train_features = Path('./Google_dataset/google_train_features.csv')
+
+    train_descriptions = load_clean_descriptions(file_train_descriptions)
     print('Descriptions: train=%d' % len(train_descriptions))
     # photo features
-    train_features = load_photo_features('features.pkl', train)
+    train_features = load_photo_features(file_train_features)
     print('Photos: train=%d' % len(train_features))
     # prepare tokenizer
     tokenizer = create_tokenizer(train_descriptions)
+
     vocab_size = len(tokenizer.word_index) + 1
     print('Vocabulary Size: %d' % vocab_size)
+
     # determine the maximum sequence length
     max_length = max_length(train_descriptions)
     print('Description Length: %d' % max_length)
 
     # define the model
     model = define_model(vocab_size, max_length)
+
     # train the model, run epochs manually and save after each epoch
     epochs = 20
     steps = len(train_descriptions)
     for i in range(epochs):
         # create the data generator
+        # TODO:!!!!!!!!!!!!!!!!!
         generator = data_generator(train_descriptions, train_features, tokenizer, max_length)
         # fit for one epoch
         model.fit_generator(generator, epochs=1, steps_per_epoch=steps, verbose=1)

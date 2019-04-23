@@ -1,70 +1,46 @@
 import string
+import csv
+import pickle
+from pathlib import Path
 
 
 # load doc into memory
 def load_doc(filename):
-    # open the file as read only
-    file = open(filename, 'r')
-    # read all text
-    text = file.read()
-    # close the file
-    file.close()
-    return text
+    with filename.open('r', encoding='utf-8') as csvreader:
+        data = csv.reader(csvreader, delimiter='\t')
+        for row in data:
+            print(row[0], ' ', row[1])
+            yield row[0], row[1]
 
 
-# extract descriptions for images
-def load_descriptions(doc):
-    mapping = dict()
-    # process lines
-    for line in doc.split('\n'):
-        # split line by white space
-        tokens = line.split()
-        if len(line) < 2:
-            continue
-        # take the first token as the image id, the rest as the description
-        image_id, image_desc = tokens[0], tokens[1:]
-        # remove filename from image id
-        image_id = image_id.split('.')[0]
-        # convert description tokens back to string
-        image_desc = ' '.join(image_desc)
-        # create the list if needed
-        if image_id not in mapping:
-            mapping[image_id] = list()
-        # store description
-        mapping[image_id].append(image_desc)
-    return mapping
-
-
-def clean_descriptions(descriptions):
-    # prepare translation table for removing punctuation
-
+def clean_descriptions(descriptions, file_to_save):
     # ''-not change only delete the symbols that in string.punctuation
     table = str.maketrans('', '', string.punctuation)
-    for key, desc_list in descriptions.items():
-        for i in range(len(desc_list)):
-            desc = desc_list[i]
-            # tokenize
-            desc = desc.split()
-            # convert to lower case
-            desc = [word.lower() for word in desc]
-            # remove punctuation from each token
-            desc = [w.translate(table) for w in desc]
-            # remove hanging 's' and 'a'
-            desc = [word for word in desc if len(word) > 1]
-            # remove tokens with numbers in them
-            desc = [word for word in desc if word.isalpha()]
-            # store as string
-            desc_list[i] = ' '.join(desc)
 
+    with file_to_save.open('w', encoding='utf-8') as fw:
+        for image_id, image_desc in descriptions:
+                # tokenize
+                desc = image_desc.split()
+                # convert to lower case
+                desc = [word.lower() for word in desc]
+                # remove punctuation from each token
+                desc = [w.translate(table) for w in desc]
+                # remove hanging 's' and 'a'
+                desc = [word for word in desc if len(word) > 1]
+                # remove tokens with numbers in them
+                desc = [word for word in desc if word.isalpha()]
+                # store as string
+                desc = ' '.join(desc)
+                fw.write(','.join([image_id, desc, '\n']))
 
 # convert the loaded descriptions into a vocabulary of words
-def to_vocabulary(descriptions):
+def to_vocabulary(clean_descr_file):
     # build a list of all description strings
     all_desc = set()
-    for key in descriptions.keys():
-        [all_desc.update(d.split()) for d in descriptions[key]]
-
-    print(all_desc)
+    with clean_descr_file.open('r', encoding='utf-8') as csvreader:
+        data = csv.reader(csvreader, delimiter=',')
+        for row in data:
+            all_desc.update(row[1].split())
     return all_desc
 
 
@@ -81,16 +57,12 @@ def save_descriptions(descriptions, filename):
 
 
 if __name__ == '__main__':
-    filename = 'C:\\Angelina_caption_generation\\Flickr8k_text\\Flickr8k.token.txt'
+    # filename = Path('.\\images_mapping_train.csv')
+    file_to_save = Path('.\\train_clear_descr.csv')
     # load descriptions
-    doc = load_doc(filename)
-    # parse descriptions
-    descriptions = load_descriptions(doc)
-    print('Loaded: %d ' % len(descriptions))
-    # clean descriptions
-    clean_descriptions(descriptions)
-    # summarize vocabulary
-    vocabulary = to_vocabulary(descriptions)
+    # dataset = load_doc(filename)
+    # clean_descriptions(dataset, file_to_save)
+    vocabulary = to_vocabulary(file_to_save)
+    print(vocabulary)
     print('Vocabulary Size: %d' % len(vocabulary))
-    # save to file
-    save_descriptions(descriptions, 'C:\\Angelina_caption_generation\\First_start\\descriptions.txt')
+    pickle.dump(vocabulary, open('.\\google_train_vocabulary.pkl', 'wb'))
