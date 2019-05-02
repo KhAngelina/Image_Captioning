@@ -128,27 +128,29 @@ if __name__ == '__main__':
     # prepare tokenizer
     tokenizer = create_tokenizer(train_descriptions)
 
-    vocab_size = len(tokenizer.word_index) + 1
-    print('Vocabulary Size: %d' % vocab_size)
+    print(tokenizer.texts_to_sequences(['boy'])[0])
 
-    # determine the maximum sequence length
-    max_length = max_length(train_descriptions)
-    print('Description Length: %d' % max_length)
+    # vocab_size = len(tokenizer.word_index) + 1
+    # print('Vocabulary Size: %d' % vocab_size)
+    #
+    # # determine the maximum sequence length
+    # max_length = max_length(train_descriptions)
+    # print('Description Length: %d' % max_length)
+    #
+    # # define the model
+    # model = define_model(vocab_size, max_length)
+    #
+    # # train the model, run epochs manually and save after each epoch
+    # epochs = 10
+    # steps = get_steps_by_features(file_train_features)
+    # print(steps)
 
-    # define the model
-    model = define_model(vocab_size, max_length)
-
-    # train the model, run epochs manually and save after each epoch
-    epochs = 10
-    steps = get_steps_by_features(file_train_features)
-    print(steps)
-
-    for i in range(epochs):
-        # create the data generator
-        features_generator = dataset_loading(file_train_features)
-        generator = data_generator(train_descriptions, features_generator, tokenizer, max_length)
-
-        # fit for one epoch
-        model.fit_generator(generator, epochs=1, steps_per_epoch=steps, verbose=1)
-        # save model
-        model.save('google_model_' + str(i) + '.h5')
+    # for i in range(epochs):
+    #     # create the data generator
+    #     features_generator = dataset_loading(file_train_features)
+    #     generator = data_generator(train_descriptions, features_generator, tokenizer, max_length)
+    #
+    #     # fit for one epoch
+    #     model.fit_generator(generator, epochs=1, steps_per_epoch=steps, verbose=1)
+    #     # save model
+    #     model.save('google_model_' + str(i) + '.h5')

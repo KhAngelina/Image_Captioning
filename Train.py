@@ -184,7 +184,7 @@ if __name__ == '__main__':
 
     checkpoint = ModelCheckpoint(filepath, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
 
-    model.fit_generator(trainGenerator.generate_data(), steps_per_epoch=steps_train, epochs=20, verbose=2, callbacks=[checkpoint],
+    model.fit_generator(trainGenerator.generate_data(), steps_per_epoch=steps_train, epochs=epochs, verbose=2, callbacks=[checkpoint],
                         validation_data=trainGenerator.generate_data(train=False), validation_steps=steps_test)
     #
     # for i in range(epochs):
