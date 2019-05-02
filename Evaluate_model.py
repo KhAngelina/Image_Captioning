@@ -1,4 +1,6 @@
-from numpy import argmax
+import csv
+import numpy as np
+from math import log
 from pickle import load
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
@@ -34,34 +36,25 @@ def load_set(filename):
 
 
 # load clean descriptions into memory
-def load_clean_descriptions(filename, dataset):
-    # load document
-    doc = load_doc(filename)
+def load_clean_descriptions(filename):
     descriptions = dict()
-    for line in doc.split('\n'):
-        # split line by white space
-        tokens = line.split()
-        # split id from description
-        image_id, image_desc = tokens[0], tokens[1:]
-        # skip images not in the set
-        if image_id in dataset:
-            # create list
-            if image_id not in descriptions:
-                descriptions[image_id] = list()
-            # wrap description in tokens
-            desc = 'startseq ' + ' '.join(image_desc) + ' endseq'
-            # store
-            descriptions[image_id].append(desc)
+    with filename.open('r', encoding='utf-8') as csvreader:
+        data = csv.reader(csvreader, delimiter=',')
+        for row in data:
+            image_id = row[0]
+            image_desc = row[1].split()
+            descriptions[image_id] = 'startseq ' + ' '.join(image_desc) + ' endseq'
     return descriptions
 
 
 # load photo features
-def load_photo_features(filename, dataset):
-    # load all features
-    all_features = load(open(filename, 'rb'))
-    # filter features
-    features = {k: all_features[k] for k in dataset}
-    return features
+def load_photo_features(filename):
+    # load photo features from file
+    with filename.open('r', encoding='utf-8') as csvreader:
+        data = csv.reader(csvreader, delimiter=',')
+        features = {row[0]: row[1:] for row in data}
+
+        return features
 
 
 # covert a dictionary of clean descriptions to a list of descriptions
@@ -74,9 +67,9 @@ def to_lines(descriptions):
 
 # fit a tokenizer given caption descriptions
 def create_tokenizer(descriptions):
-    lines = to_lines(descriptions)
+    all_desc = list(descriptions.values())
     tokenizer = Tokenizer()
-    tokenizer.fit_on_texts(lines)
+    tokenizer.fit_on_texts(all_desc)
     return tokenizer
 
 
@@ -94,8 +87,25 @@ def word_for_id(integer, tokenizer):
     return None
 
 
+def beam_search_decoder(data, k=5):
+    sequences = [[list(), 1.0]]
+    # walk over each step in sequence
+    for row in data:
+        all_candidates = list()
+        # expand each current candidate
+        for i in range(len(sequences)):
+            seq, score = sequences[i]
+            for j in range(len(row)):
+                candidate = [seq + [j], score * -log(row[j])]
+                all_candidates.append(candidate)
+        # order all candidates by score
+        ordered = sorted(all_candidates, key=lambda tup: tup[1])
+        # select k best
+        sequences = ordered[:k]
+    return sequences
+
 # generate a description for an image
-def generate_desc(model, tokenizer, photo, max_length):
+def generate_desc(model, tokenizer, photo_features, max_length):
     # seed the generation process
     in_text = 'startseq'
     # iterate over the whole length of the sequence
@@ -105,9 +115,9 @@ def generate_desc(model, tokenizer, photo, max_length):
         # pad input
         sequence = pad_sequences([sequence], maxlen=max_length)
         # predict next word
-        yhat = model.predict([photo, sequence], verbose=0)
+        yhat = model.predict([photo_features, sequence], verbose=0)
         # convert probability to integer
-        yhat = argmax(yhat)
+        yhat = np.argmax(yhat)
         # map integer to word
         word = word_for_id(yhat, tokenizer)
         # stop if we cannot map the word
@@ -120,20 +130,18 @@ def generate_desc(model, tokenizer, photo, max_length):
             break
     return in_text
 
-def get_desc(model, pics, tokenizer, max_length):
-    predicted = list()
-    for pic_path, desc in pics.items():
-        # generate description
-        print("generate desc")
-        yhat = generate_desc(model, tokenizer, desc, max_length)
-        print(yhat)
 
-        file_to_save = Path(
-            'C:\\akharche\\UserPreferenceAnalysis\\evaluation\\user_profile_flickr8k.csv')
-        with file_to_save.open('a') as f:
-                f.write(str(pic_path) + ',' + yhat)
-                f.write('\n')
-                # yield filename, sentence
+def get_desc(model, pics, tokenizer, max_length, file_to_save):
+    predicted = list()
+    with file_to_save.open('w', encoding='utf-8') as f:
+
+        for img_name, features in pics.items():
+            # generate description
+            yhat = generate_desc(model, tokenizer, features, max_length)
+            print(yhat)
+            f.write((',').join([img_name, yhat]))
+            f.write('\n')
+                    # yield filename, sentence
 
 
 # evaluate the skill of the model
@@ -156,47 +164,63 @@ def evaluate_model(model, descriptions, photos, tokenizer, max_length):
     print('BLEU-4: %f' % corpus_bleu(actual, predicted, weights=(0.25, 0.25, 0.25, 0.25)))
 
 
+def beam_search_decoder(data, k=2):
+    sequences = [[list(), 1.0]]
+    # walk over each step in sequence
+    for row in data:
+        all_candidates = list()
+        # expand each current candidate
+        for i in range(len(sequences)):
+            seq, score = sequences[i]
+            for j in range(len(row)):
+                candidate = [seq + [j], score * -log(row[j])]
+                all_candidates.append(candidate)
+        # order all candidates by score
+        ordered = sorted(all_candidates, key=lambda tup: tup[1])
+        # select k best
+        sequences = ordered[:k]
+        print(sequences)
+    return sequences
 
 if __name__ == '__main__':
-        # prepare tokenizer on train set
+    # # prepare tokenizer on train set
+#     #
+#     # # load training dataset (6K)
+#     # clean_descriptions_train = Path('./Data/train_clear_descr.csv')
+#     # train_descriptions = load_clean_descriptions(clean_descriptions_train)
+#     # # prepare tokenizer
+#     # tokenizer = create_tokenizer(train_descriptions)
+#     # max_length = max_length(train_descriptions)
+#     # # print('Description Length: %d' % max_length)
+#     #
+#     # # prepare test set
+#     #
+#     # # load test set
+#     # clean_descriptions_test = Path('./Test_data/test_clear_descr.csv')
+#     # test_descriptions = load_clean_descriptions(clean_descriptions_test)
+#     # print('Descriptions: test=%d' % len(test_descriptions))
+#     #
+#     #
+#     # # photo features
+#     # filename = Path('./Test_data/test_features.csv')
+#     # features = load_photo_features(filename)
+#     # print('Photos: test=%d' % len(features))
+#     #
+#     #
+#     # # load the model
+#     # filename = 'google_model_11.h5'
+#     # model = load_model(filename)
+#     # # evaluate model
+#     # file_to_save = Path('./Google_Test/google_test_predictions.csv')
+#     # get_desc(model, features, tokenizer, max_length, file_to_save)
 
-        # load training dataset (6K)
-        filename = 'C:\\akharche\\First_start\\dataset\\Flickr_8k.trainImages.txt'
-        train = load_set(filename)
+    data = [[0.1, 0.2, 0.3, 0.4, 0.5],
+            [0.5, 0.4, 0.3, 0.2, 0.1],
+            [0.1, 0.2, 0.3, 0.4, 0.5],
+            [0.5, 0.4, 0.3, 0.2, 0.1],
+            [0.1, 0.2, 0.3, 0.4, 0.5]]
 
-        # print('Dataset: %d' % len(train))
-        # # descriptions
-        train_descriptions = load_clean_descriptions('descriptions.txt', train)
-        # print('Descriptions: train=%d' % len(train_descriptions))
-        # prepare tokenizer
-        tokenizer = create_tokenizer(train_descriptions)
-        # vocab_size = len(tokenizer.word_index) + 1
-        # print('Vocabulary Size: %d' % vocab_size)
-        # # determine the maximum sequence length
-        max_length = max_length(train_descriptions)
-        # print('Description Length: %d' % max_length)
+    beam_search_decoder(data)
 
-        # prepare test set
-
-        # load test set
-        filename = 'C:\\akharche\\First_start\\dataset\\Flickr_8k.testImages.txt'
-        test = load_set(filename)
-        print('Dataset: %d' % len(test))
-        # descriptions
-        test_descriptions = load_clean_descriptions('descriptions.txt', test)
-        print('Descriptions: test=%d' % len(test_descriptions))
-
-
-        # photo features
-        filename = 'C:\\akharche\\UserPreferenceAnalysis\\data\\user_profile_vgg16_features.pkl'
-        features = load(open(filename, 'rb'))
-        print('Photos: test=%d' % len(features))
-
-
-        # load the model
-        filename = 'model_11.h5'
-        model = load_model(filename)
-        # evaluate model
-        get_desc(model, features, tokenizer, max_length)
 
 

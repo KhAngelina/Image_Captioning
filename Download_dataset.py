@@ -13,12 +13,12 @@ import pickle
 def dataset_loading(path_to_data):
     with path_to_data.open('r', encoding='utf-8') as tsvreader:
         data = csv.reader(tsvreader, delimiter='\t')
-        for row in data:
-            yield row[0], row[1]
+        for i, row in enumerate(data):
+            yield i, row[0], row[1]
 
 def pics_mapping(path_to_data, data_gen):
     with path_to_data.open('w', encoding='utf-8') as fw:
-        for i, url, descr in data_gen:
+        for i, descr, url in data_gen:
             s = ('\t').join([str(i), url,  '\n'])
             fw.write(s)
 
@@ -63,13 +63,18 @@ def download(dataset, path_to_save, names_map):
 if __name__ == '__main__':
     print("Download data from source...")
 
-    path_to_save = Path('./Google_Train/')
-    img_directory = Path('./Google_dataset/images_url_train.csv')
-
-    dataset = dataset_loading(img_directory)
-
-    # pics_mapping(img_directory, dataset)
+    # path_to_save = Path('./Google_Train/')
+    # img_directory = Path('./Google_dataset/images_url_train.csv')
+    #
     # dataset = dataset_loading(img_directory)
-    names_map = img_name_map(img_directory)
-    download(dataset, path_to_save, names_map)
+    #
+    # # pics_mapping(img_directory, dataset)
+    # # dataset = dataset_loading(img_directory)
+    # names_map = img_name_map(img_directory)
+    # download(dataset, path_to_save, names_map)
+
+    path_to_data = Path('./Google_dataset/Validation_GCC-1.1.0-Validation.tsv')
+    data_gen = dataset_loading(path_to_data)
+    path_to_save = Path('./images_url_validation.csv')
+    pics_mapping(path_to_save, data_gen)
 

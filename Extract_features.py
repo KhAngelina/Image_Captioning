@@ -17,6 +17,8 @@ def dataset_loading(path_to_data):
 def extract_pic_features(pics_data_file, pics_folder, path_to_save):
     # load the model
     model = MobileNetV2(weights='imagenet', input_shape=(224, 224, 3), alpha=1.0, pooling='avg', include_top=False)
+    model.summary()
+
     img_dir = pics_folder
 
     with pics_data_file.open('r') as csvreader:
@@ -44,9 +46,15 @@ def extract_pic_features(pics_data_file, pics_folder, path_to_save):
 if __name__ == '__main__':
     print("Extract features")
     # extract features from all images
-    img_directory = Path('.\\Data\\images_mapping_train.csv')
-    file_save = Path('.\\google_train_features.csv')
-    pics_folder = Path('.\\Google_Train\\')
+    # img_directory = Path('.\\Data\\images_mapping_train.csv')
+    #     # file_save = Path('.\\google_train_features.csv')
+    #     # pics_folder = Path('.\\Google_Train\\')
+    #     #
+    #     # extract_pic_features(img_directory, pics_folder, file_save)
+
+    img_directory = Path('./images_mapping_test.csv')
+    file_save = Path('./google_test_features.csv')
+    pics_folder = Path('./Google_Test/')
 
     extract_pic_features(img_directory, pics_folder, file_save)
 
