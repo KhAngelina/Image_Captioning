@@ -1,6 +1,7 @@
 import csv
 import numpy as np
 import math
+import pandas as pd
 from pathlib import Path
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
@@ -25,7 +26,8 @@ class TrainGenerator(object):
                  tokenizer,
                  captions,
                  max_length,
-                 vocab_size):
+                 vocab_size,
+                 max_cache_size):
 
         self._batch_size = batch_size
         self._photo_features_train = photo_features_train
@@ -34,6 +36,7 @@ class TrainGenerator(object):
         self._captions = captions
         self._max_length = max_length
         self._vocab_size = vocab_size
+        self._max_cache_size = max_cache_size
 
     def generate_data(self, train=True):
         X1, X2, y = list(), list(), list()
@@ -47,7 +50,6 @@ class TrainGenerator(object):
                 description = self._captions[img_id]
 
                 seq = self._tokenizer.texts_to_sequences([description])[0]
-                # split one sequence into multiple X,y pairs
 
                 n += 1
                 for i in range(1, len(seq)):
@@ -57,7 +59,9 @@ class TrainGenerator(object):
                     in_seq = pad_sequences([in_seq], maxlen=self._max_length)[0]
 
                     # encode output sequence
+
                     out_seq = to_categorical([out_seq], num_classes=self._vocab_size)[0]
+
                     # store
                     X1.append(features)
                     X2.append(in_seq)
@@ -67,6 +71,78 @@ class TrainGenerator(object):
                     yield [[np.array(X1), np.array(X2)], np.array(y)]
                     X1, X2, y = list(), list(), list()
                     n = 0
+
+    def generate_by_cache(self, img_file, eof):
+        X1, X2, y = list(), list(), list()
+
+        img_cache = []
+
+        while True:
+
+            with img_file.open('r', encoding='utf-8') as fr:
+                data = csv.reader(fr, delimiter=',')
+                for i, row in enumerate(data):
+                    img_cache.append(row)
+
+                    if (len(img_cache) == self._max_cache_size) or (i == eof):
+
+                        n = 0
+                        for img in img_cache:
+                            img_id = img[0]
+                            feature = img[1:]
+                            description = self._captions[img_id]
+
+                            seq = self._tokenizer.texts_to_sequences([description])[0]
+                            n+=1
+
+                            for i in range(1, len(seq)):
+                                in_seq, out_seq = seq[:i], seq[i]
+                                in_seq = pad_sequences([in_seq], maxlen=self._max_length)[0]
+                                out_seq = to_categorical([out_seq], num_classes=self._vocab_size)[0]
+
+                                X1.append(feature)
+                                X2.append(in_seq)
+                                y.append(out_seq)
+
+                            if n == self._batch_size:
+                                yield [[np.array(X1), np.array(X2)], np.array(y)]
+                                X1, X2, y = list(), list(), list()
+                                n = 0
+                        img_cache = []
+
+    def generate_by_chunk(self, img_file):
+        X1, X2, y = list(), list(), list()
+
+        while True:
+            for chunk in pd.read_csv(img_file, header=None, chunksize=self._max_cache_size, delimiter='\t'):
+                iter = chunk.iterrows()
+                img_cache = []
+
+                for i in range(chunk.shape[0]):
+                    x = next(iter)
+                    img_cache.append(x[1][0])
+
+                n = 0
+                for img in img_cache:
+                    img_data = img.split(',')
+                    img_id, features = img_data[0], img_data[1:]
+
+                    description = self._captions[img_id]
+                    seq = self._tokenizer.texts_to_sequences([description])[0]
+                    n += 1
+
+                    for i in range(1, len(seq)):
+                        in_seq, out_seq = seq[:i], seq[i]
+                        in_seq = pad_sequences([in_seq], maxlen=self._max_length)[0]
+
+                        X1.append(features)
+                        X2.append(in_seq)
+                        y.append(out_seq)
+
+                    if n == self._batch_size:
+                        yield [[np.array(X1), np.array(X2)], np.array(y)]
+                        X1, X2, y = list(), list(), list()
+                        n = 0
 
     # define the captioning model
     def define_model(self):
@@ -87,7 +163,7 @@ class TrainGenerator(object):
         # tie it together [image, seq] [word]
         model = Model(inputs=[inputs1, inputs2], outputs=outputs)
         # compile model
-        model.compile(loss='categorical_crossentropy', optimizer='adam')
+        model.compile(loss='sparse_categorical_crossentropy', optimizer='adam')
         # summarize model
         model.summary()
         # plot_model(model, to_file='model.png', show_shapes=True)
@@ -137,14 +213,11 @@ def dataset_loading(path_to_data):
         for row in data:
             yield row[0], row[1:]
 
-
-
-
 if __name__ == '__main__':
-    file_train_descriptions = Path('./Data/train_clear_descr.csv')
-    file_train_features = Path('./Data/google_train_features.csv')
+    file_train_descriptions = Path('./train_clear_descr.csv')
+    file_train_features = Path('./google_train_features1.csv')
 
-    file_test_features = Path('./Data/google_test_features.csv')
+    file_test_features = Path('./google_test_features.csv')
 
     train_descriptions = load_clean_descriptions(file_train_descriptions)
     print('Descriptions: train=%d' % len(train_descriptions))
@@ -158,34 +231,54 @@ if __name__ == '__main__':
 
     # determine the maximum sequence length
     max_length = max_length(train_descriptions)
-    print('Description Length: %d' % max_length)
+    print('Max Length: %d' % max_length)
 
-    features_generator_train = dataset_loading(file_train_features)
-    features_generator_test = dataset_loading(file_test_features)
+    # features_generator_train = dataset_loading(file_train_features)
+    # features_generator_test = dataset_loading(file_test_features)
 
-    batch_size = 128
+    features_generator_train = None
+    features_generator_test = None
+
+    batch_size = 512
     trainGenerator = TrainGenerator(batch_size=batch_size,
                                     photo_features_train=features_generator_train,
                                     photo_features_test=features_generator_test,
                                     tokenizer=tokenizer,
                                     captions=train_descriptions,
                                     max_length=max_length,
-                                    vocab_size=vocab_size)
+                                    vocab_size=vocab_size,
+                                    max_cache_size=batch_size*500)
 
     # define the model
     model = trainGenerator.define_model()
 
-    # train the model, run epochs manually and save after each epoch
     epochs = 10
-    steps_train = math.ceil(get_steps_by_features(file_train_features) / batch_size)
-    steps_test = math.ceil(get_steps_by_features(file_test_features) / batch_size)
 
-    filepath = 'google_model-ep{epoch:03d}-loss{loss:.3f}-val_loss{val_loss:.3f}.h5'
+    train_features_len = get_steps_by_features(file_train_features)
+    test_features_len = get_steps_by_features(file_test_features)
 
-    checkpoint = ModelCheckpoint(filepath, monitor='val_loss', verbose=1, save_best_only=True, mode='min')
+    steps_train = math.ceil(train_features_len / batch_size)
+    steps_test = math.ceil(test_features_len / batch_size)
 
-    model.fit_generator(trainGenerator.generate_data(), steps_per_epoch=steps_train, epochs=epochs, verbose=2, callbacks=[checkpoint],
-                        validation_data=trainGenerator.generate_data(train=False), validation_steps=steps_test)
+    filepath = 'new_google_model-ep{epoch:03d}-loss{loss:.3f}-val_loss{val_loss:.3f}.h5'
+
+    checkpoint = ModelCheckpoint(filepath, monitor='val_loss', save_best_only=True, mode='min')
+
+    # model.fit_generator(trainGenerator.generate_data(),
+    #                     steps_per_epoch=steps_train,
+    #                     epochs=epochs,
+    #                     callbacks=[checkpoint],
+    #                     validation_data=trainGenerator.generate_data(train=False),
+    #                     validation_steps=steps_test,
+    #                     )
+
+    model.fit_generator(trainGenerator.generate_by_chunk(file_train_features),
+                        steps_per_epoch=steps_train,
+                        epochs=epochs,
+                        callbacks=[checkpoint],
+                        validation_data=trainGenerator.generate_by_chunk(file_test_features),
+                        validation_steps=steps_test,
+                        )
     #
     # for i in range(epochs):
     #     # create the data generator
