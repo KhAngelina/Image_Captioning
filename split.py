@@ -1,5 +1,6 @@
 from pathlib import Path
 import csv
+import math
 
 
 def split(target_file, file1, file2, nrow=3000000):
@@ -16,6 +17,15 @@ def split(target_file, file1, file2, nrow=3000000):
                     fw.write(row)
 
 
+# load photo features
+def get_row_count(filename):
+    # load photo features from file
+    with filename.open('r', encoding='utf-8') as csvreader:
+        data = csv.reader(csvreader, delimiter='\t')
+        i = 0
+        for i, _ in enumerate(data):
+            pass
+        return i
 
 if __name__ == '__main__':
     # target_file = Path('./google_train_features.csv')
@@ -30,7 +40,12 @@ if __name__ == '__main__':
     file1 = Path('./InseptionV3_model/google_train_features_inception1.csv')
     file2 = Path('./InseptionV3_model/google_test_features_inception.csv')
 
-    split(target_file, file1, file2)
+    row_num = get_row_count(target_file)
+
+    train_row_num = math.ceil(0.8*row_num)
+    print(train_row_num)
+
+    split(target_file, file1, file2, nrow=train_row_num)
 
 
 
