@@ -18,10 +18,17 @@ def split(target_file, file1, file2, nrow=3000000):
 
 
 if __name__ == '__main__':
-    target_file = Path('./google_train_features.csv')
+    # target_file = Path('./google_train_features.csv')
 
-    file1 = Path('./google_train_features1.csv')
-    file2 = Path('./google_test_features.csv')
+    # file1 = Path('./google_train_features1.csv')
+    # file2 = Path('./google_test_features.csv')
+
+    # split(target_file, file1, file2)
+
+    target_file = Path('./InseptionV3_model/google_train_features_inception.csv')
+
+    file1 = Path('./InseptionV3_model/google_train_features_inception1.csv')
+    file2 = Path('./InseptionV3_model/google_test_features_inception.csv')
 
     split(target_file, file1, file2)
 
