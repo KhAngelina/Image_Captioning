@@ -1,6 +1,9 @@
 import pickle
 import numpy as np
-from math import log
+import pathlib
+import csv
+
+import concurrent.futures
 
 from numpy import argmax
 from keras.preprocessing.sequence import pad_sequences
@@ -11,20 +14,40 @@ from keras.preprocessing.image import img_to_array
 from keras.models import load_model
 
 
+
 # extract features from photo
-def extract_features(img):
+def extract_features(img, model_features):
     # load the model
-    model = MobileNetV2(weights='imagenet', input_shape=(224, 224, 3), alpha=1.0, pooling='avg', include_top=False)
 
     image = load_img(img, target_size=(224, 224))
     image = img_to_array(image)
     image = image.reshape((1, image.shape[0], image.shape[1], image.shape[2]))
     image = preprocess_input(image)
-    feature = model.predict(image, verbose=0)
-    print(feature.shape)
 
-    return feature
+    features = model_features.predict(image, verbose=0)
+    return features
 
+
+def dataset_loading(path_to_data):
+    with path_to_data.open('r', encoding='utf-8') as fr:
+        data = csv.reader(fr, delimiter=',')
+        for row in data:
+            yield row[0], row[1:]
+
+
+def features_generator(path_to_data, pictures_path, path_to_save):
+    model_features = MobileNetV2(weights='imagenet', input_shape=(224, 224, 3), alpha=1.0, pooling='avg', include_top=False)
+    with path_to_data.open('r', encoding='utf-8') as fr:
+        data = fr.readlines()
+        with path_to_save.open('w') as fw:
+            for i, row in enumerate(data):
+                print(i)
+
+                row = row.strip()
+                pic_info = pictures_path / row
+                photo_features = extract_features(pic_info, model_features)[0]
+                feature_str = (',').join([str(f) for f in photo_features])
+                fw.write(row + ',' + feature_str+'\n')
 
 # map an integer to a word
 def word_by_id(word_idx, tokenizer):
@@ -39,19 +62,20 @@ def generate_desc(model, tokenizer, photo_features, max_length):
     # seed the generation process
     in_text = 'startseq'
     # iterate over the whole length of the sequence
-    model.summary()
+    # model.summary()
 
     for i in range(max_length):
         sequence = tokenizer.texts_to_sequences([in_text])[0]
         sequence = pad_sequences([sequence], maxlen=max_length)
         # predict next word
 
-        next_word = model.predict([photo_features, sequence], verbose=0)
+        next_word = model.predict([np.asarray(photo_features), np.asarray(sequence)], verbose=0)
         # convert probability to integer
-        # TODO: BEAM_SEARCH
         next_word = argmax(next_word)
 
         word = word_by_id(next_word, tokenizer)
+
+        # print(str(next_word) + "    " + str(word))
 
         if word is None or word == 'endseq':
             break
@@ -60,68 +84,126 @@ def generate_desc(model, tokenizer, photo_features, max_length):
 
     return in_text.replace('startseq ', '')
 
-# def beam_search_decoder(data, beam_size=3):
-#     sequences = [[list(), 1.0]]
-#     # walk over each step in sequence
-#     for row in data:
-#         all_candidates = list()
-#         # expand each current candidate
-#         for i in range(len(sequences)):
-#             seq, score = sequences[i]
-#             for j in range(len(row)):
-#                 candidate = [seq + [j], score * -log(row[j])]
-#                 all_candidates.append(candidate)
-#         # order all candidates by score
-#         ordered = sorted(all_candidates, key=lambda tup: tup[1])
-#         # select k best
-#         sequences = ordered[:beam_size]
-#         print(sequences)
-#     return sequences
+
+def process_captions(captions, tokenizer):
+    result_captions = []
+    end_id = tokenizer.texts_to_sequences(['endseq'])[0][0]
+    for caption in captions:
+        processed_caption = caption[0][1:]
+        # try:
+        end_index = processed_caption.index(end_id)
+        processed_caption = processed_caption[:end_index]
+        result_captions.append(' '.join(word_by_id(idx, tokenizer) for idx in processed_caption))
+        # except Exception:
+        #     pass
+
+    return result_captions
+
+def get_best_caption(captions, tokenizer):
+    end_id = tokenizer.texts_to_sequences(['endseq'])[0][0]
+    captions.sort(key=lambda l: l[1])
+    best_caption = captions[-1][0]
+
+    processed_caption = best_caption[1:]
+    end_index = processed_caption.index(end_id)
+    processed_caption = processed_caption[:end_index]
+
+    return ' '.join([word_by_id(i, tokenizer) for i in processed_caption])
 
 
 def beam_search_predictions(model, tokenizer, photo_features, max_length, beam_index=3):
-    in_text = 'startseq'
-    start = tokenizer.texts_to_sequences([in_text])[0]
+    start = tokenizer.texts_to_sequences(['startseq'])[0]
+    end = tokenizer.texts_to_sequences(['endseq'])[0][0]
+    # print(photo_features.shape)
 
-    start_word = [[start, 0.0]]
+    captions = [[start, 0.0]]
 
-    while len(start_word[0][0]) < max_length:
+    completed_captions = []
+
+    while len(captions[0][0]) < max_length:
+
         all_candidates = []
-        for s in start_word:
-            sequence = tokenizer.texts_to_sequences([in_text])[0]
-            par_caps = pad_sequences([sequence], maxlen=max_length)
-            next_words = model.predict([photo_features, par_caps], verbose=0)
 
-            word_preds = np.argsort(next_words)[-beam_index:]
+        for caption in captions:
+            partial_caption = pad_sequences([caption[0]], maxlen=max_length)
+            next_words_pred = model.predict([np.asarray(photo_features), np.asarray(partial_caption)], verbose=0)[0]
+
+            next_words = np.argsort(next_words_pred)[::-1][:beam_index]
+
+            for word in next_words:
+                new_partial_caption, new_partial_caption_prob = caption[0][:], caption[1]
+                new_partial_caption.append(word)
+                new_partial_caption_prob -= np.log(next_words_pred[word])
+
+                # Normalization
+                # new_partial_caption_prob *= 1/len(new_partial_caption)
+
+                if word == end:
+                    completed_captions.append([new_partial_caption, new_partial_caption_prob])
+                else:
+                    all_candidates.append([new_partial_caption, new_partial_caption_prob])
+
+        # a = [np.exp(s[1]) for s in all_candidates]
+        # print('')
+        all_candidates.sort(key=lambda x: x[1]/len(x[0]))
+        # all_candidates = all_candidates[::-1]
+        captions = all_candidates[:beam_index]
+
+    completed_captions.sort(key=lambda x: x[1]/len(x[0]))
+    # completed_captions = completed_captions[::-1]
+    res = process_captions(completed_captions[:beam_index], tokenizer)
+
+    return res
 
 
-            # Getting the top <beam_index>(n) predictions and creating a
-            # new list so as to put them via the model again
-            for w in word_preds:
-                next_cap, prob = s[0:], s[1]
-                next_cap.append(w)
-                prob += word_preds[0][w]
-                all_candidates.append([next_cap, prob])
+def get_dataset_imgs(dataset_list):
+    with dataset_list.open('r', encoding='utf-8') as fr:
+        lines = fr.readlines()
+        for i, line in enumerate(lines):
+            yield i, line
 
-        start_word = all_candidates
-        # Sorting according to the probabilities
-        start_word = sorted(start_word, reverse=False, key=lambda l: l[1])
-        # Getting the top words
-        start_word = start_word[-beam_index:]
 
-    start_word = start_word[-1][0]
-    intermediate_caption = [word_by_id(i, tokenizer) for i in start_word]
+def predict_caption(model, tokenizer, max_length, photo_features, beam_search=False, beam_size=3):
 
-    final_caption = []
+    if beam_search:
+        description = beam_search_predictions(model, tokenizer, [photo_features], max_length, beam_index=beam_size)
+        description = (',').join(description)
+    else:
+        description = generate_desc(model, tokenizer, photo_features, max_length)
+    return description
 
-    for i in intermediate_caption:
-        if i != 'endseq':
-            final_caption.append(i)
-        else:
-            break
 
-    final_caption = ' '.join(final_caption[1:])
-    return final_caption
+def predict_captions_flickr8k(img_features_generator,
+                              file_to_save,
+                              model,
+                              tokenizer,
+                              max_length=52,
+                              beam_search=False,
+                              beam_size=3):
+
+    # with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+        future_to_caption = {}
+        with file_to_save.open('a', encoding='utf-8') as fw:
+            for img, feature in img_features_generator:
+                print(img)
+
+                feature = [float(f) for f in feature]
+
+                # future_to_caption[executor.submit(predict_caption, model, tokenizer, max_length,
+                #                                   feature, beam_search, beam_size)] = img
+
+                # while len(future_to_caption) > 5:
+                #     for future in concurrent.futures.as_completed(future_to_caption):
+                #         img = future_to_caption.pop(future)
+                #         descr = future.result()
+
+                descr = predict_caption(model, tokenizer, max_length, feature, beam_search, beam_size)
+                fw.write(img + ',' + descr + '\n')
+
+                # for future in concurrent.futures.as_completed(future_to_caption):
+                #     line = future_to_caption.pop(future)
+                #     descr = future.result()
+                #     fw.write(line + ',' + descr + '\n')
 
 
 if __name__ == '__main__':
@@ -133,12 +215,34 @@ if __name__ == '__main__':
     # print(tokenizer)
     max_length = 52
     # load the model
-    model = load_model('./Data/new_google_model-ep008-loss3.679-val_loss3.642.h5')
+    model = load_model('./Data/new_google_model-ep010-loss3.659-val_loss3.629.h5')
     # load and prepare the photograph
-    photo_features = extract_features('./Data/4.jpg')
-    # generate description
-    description = generate_desc(model, tokenizer, photo_features, max_length)
+    flickr8k_dataset_path = pathlib.Path('C:\\akharche\\UserPreferenceAnalysis\\Image_Captioning\\Flickr8k_Data\\Flicker8k_Dataset\\')
+    flickr8k_captions_save = pathlib.Path('./!Results/Flickr8k_eval/google_model_flickr8k_testset_captions_beamsearch_3.csv')
+    dataset_list = pathlib.Path('./Flickr8k_Data/Flickr_8k.testImages.txt')
 
-    description_b_s = beam_search_predictions(model, tokenizer, photo_features, max_length, beam_index=3)
+    dataset_list_generator =get_dataset_imgs(dataset_list)
 
-    print(description)
+    path_to_save = pathlib.Path('flickr8k_test_features_mobilenet.csv')
+
+    # features_generator(dataset_list, flickr8k_dataset_path, path_to_save)
+
+    features_generated = dataset_loading(path_to_save)
+
+
+    predict_captions_flickr8k(features_generated,
+                              flickr8k_captions_save,
+                              model,
+                              tokenizer,
+                              max_length=52,
+                              beam_search=True)
+
+
+
+    # img = './Data/11.png'
+    # photo_features = extract_features(img)
+    # desc = generate_desc(model, tokenizer, photo_features, max_length)
+    # cap = beam_search_predictions(model, tokenizer, photo_features, max_length, beam_index=3)
+    #
+    # print(desc)
+    # print(cap)

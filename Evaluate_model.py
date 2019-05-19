@@ -165,24 +165,6 @@ def evaluate_model(model, descriptions, photos, tokenizer, max_length):
     print('BLEU-4: %f' % corpus_bleu(actual, predicted, weights=(0.25, 0.25, 0.25, 0.25)))
 
 
-def beam_search_decoder(data, k=2):
-    sequences = [[list(), 1.0]]
-    # walk over each step in sequence
-    for row in data:
-        all_candidates = list()
-        # expand each current candidate
-        for i in range(len(sequences)):
-            seq, score = sequences[i]
-            for j in range(len(row)):
-                candidate = [seq + [j], score * -log(row[j])]
-                all_candidates.append(candidate)
-        # order all candidates by score
-        ordered = sorted(all_candidates, key=lambda tup: tup[1])
-        # select k best
-        sequences = ordered[:k]
-        print(sequences)
-    return sequences
-
 
 if __name__ == '__main__':
     # # prepare tokenizer on train set
