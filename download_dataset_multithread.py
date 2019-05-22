@@ -10,11 +10,13 @@ def dataset_loading(path_to_data):
         for row in data:
             yield row[0], row[1]
 
+
 def pics_mapping(path_to_data, data_gen):
     with path_to_data.open('w', encoding='utf-8') as fr:
         for i, url, descr in data_gen:
             s = ('\t').join([str(i), url,  '\n'])
             fr.write(s)
+
 
 def load_url(url, timeout=10):
     r = requests.get(url, timeout=timeout)
@@ -56,7 +58,6 @@ def download(dataset, path_to_save, names_map):
                         print('%r generated an exception: %s \nSkipe: %s' % (url, exc, name))
 
 
-
         for future in concurrent.futures.as_completed(future_to_url):
             url = future_to_url.pop(future)
             name_img = str(names_map[url]) + '.jpg'
@@ -72,8 +73,8 @@ def download(dataset, path_to_save, names_map):
 if __name__ == '__main__':
     print("Download data from source...")
 
-    path_to_save = Path('./Google_Train/')
-    img_directory = Path('./Google_dataset/images_url_train.csv')
+    path_to_save = Path('./Data/Google_dataset_test/')
+    img_directory = Path('./Data/images_url_validation_short.csv')
 
     dataset = dataset_loading(img_directory)
     # pics_mapping(img_directory, dataset)

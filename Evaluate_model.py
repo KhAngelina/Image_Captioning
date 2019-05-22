@@ -1,172 +1,197 @@
 import csv
 import numpy as np
+
 from math import log
 from pickle import load
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import load_model
-from nltk.translate.bleu_score import corpus_bleu
+from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.gleu_score import sentence_gleu
 from pathlib import Path
 from keras.preprocessing import sequence
 
+from Prepare_text_data import clean_descriptions
 
-# load doc into memory
-def load_doc(filename):
-    # open the file as read only
-    file = open(filename, 'r')
-    # read all text
-    text = file.read()
-    # close the file
-    file.close()
-    return text
+from pathlib import Path
 
-
-# load a pre-defined list of photo identifiers
-def load_set(filename):
-    doc = load_doc(filename)
-    dataset = list()
-    # process line by line
-    for line in doc.split('\n'):
-        # skip empty lines
-        if len(line) < 1:
-            continue
-        # get the image identifier
-        identifier = line.split('.')[0]
-        dataset.append(identifier)
-    return set(dataset)
-
-
-# load clean descriptions into memory
-def load_clean_descriptions(filename):
-    descriptions = dict()
-    with filename.open('r', encoding='utf-8') as csvreader:
-        data = csv.reader(csvreader, delimiter=',')
-        for row in data:
-            image_id = row[0]
-            image_desc = row[1].split()
-            descriptions[image_id] = 'startseq ' + ' '.join(image_desc) + ' endseq'
-    return descriptions
-
-
-# load photo features
-def load_photo_features(filename):
-    # load photo features from file
-    with filename.open('r', encoding='utf-8') as csvreader:
-        data = csv.reader(csvreader, delimiter=',')
-        features = {row[0]: row[1:] for row in data}
-
-        return features
-
-
-# covert a dictionary of clean descriptions to a list of descriptions
-def to_lines(descriptions):
-    all_desc = list()
-    for key in descriptions.keys():
-        [all_desc.append(d) for d in descriptions[key]]
-    return all_desc
-
-
-# fit a tokenizer given caption descriptions
-def create_tokenizer(descriptions):
-    all_desc = list(descriptions.values())
-    tokenizer = Tokenizer()
-    tokenizer.fit_on_texts(all_desc)
-    return tokenizer
-
-
-# calculate the length of the description with the most words
-def max_length(descriptions):
-    lines = to_lines(descriptions)
-    return max(len(d.split()) for d in lines)
-
-
-# map an integer to a word
-def word_for_id(integer, tokenizer):
-    for word, index in tokenizer.word_index.items():
-        if index == integer:
-            return word
-    return None
-
-
-def beam_search_decoder(data, k=5):
-    sequences = [[list(), 1.0]]
-    # walk over each step in sequence
-    for row in data:
-        all_candidates = list()
-        # expand each current candidate
-        for i in range(len(sequences)):
-            seq, score = sequences[i]
-            for j in range(len(row)):
-                candidate = [seq + [j], score * -log(row[j])]
-                all_candidates.append(candidate)
-        # order all candidates by score
-        ordered = sorted(all_candidates, key=lambda tup: tup[1])
-        # select k best
-        sequences = ordered[:k]
-    return sequences
-
-# generate a description for an image
-def generate_desc(model, tokenizer, photo_features, max_length):
-    # seed the generation process
-    in_text = 'startseq'
-    # iterate over the whole length of the sequence
-    for i in range(max_length):
-        # integer encode input sequence
-        sequence = tokenizer.texts_to_sequences([in_text])[0]
-        # pad input
-        sequence = pad_sequences([sequence], maxlen=max_length)
-        # predict next word
-        yhat = model.predict([photo_features, sequence], verbose=0)
-        # convert probability to integer
-        yhat = np.argmax(yhat)
-        # map integer to word
-        word = word_for_id(yhat, tokenizer)
-        # stop if we cannot map the word
-        if word is None:
-            break
-        # append as input for generating the next word
-        in_text += ' ' + word
-        # stop if we predict the end of the sequence
-        if word == 'endseq':
-            break
-    return in_text
-
-
-def get_desc(model, pics, tokenizer, max_length, file_to_save):
-    predicted = list()
-    with file_to_save.open('w', encoding='utf-8') as f:
-
-        for img_name, features in pics.items():
-            # generate description
-            yhat = generate_desc(model, tokenizer, features, max_length)
-            print(yhat)
-            f.write((',').join([img_name, yhat]))
-            f.write('\n')
-                    # yield filename, sentence
+import Predict_caption
 
 
 # evaluate the skill of the model
-def evaluate_model(model, descriptions, photos, tokenizer, max_length):
-    actual, predicted = list(), list()
-    # step over the whole set
-    for key, desc_list in descriptions.items():
-        # generate description
-        yhat = generate_desc(model, tokenizer, photos[key], max_length)
-        # store actual and predicted
-        references = [d.split() for d in desc_list]
-        print(references)
-        actual.append(references)
-        predicted.append(yhat.split())
-        print(yhat)
-    # calculate BLEU score
-    print('BLEU-1: %f' % corpus_bleu(actual, predicted, weights=(1.0, 0, 0, 0)))
-    print('BLEU-2: %f' % corpus_bleu(actual, predicted, weights=(0.5, 0.5, 0, 0)))
-    print('BLEU-3: %f' % corpus_bleu(actual, predicted, weights=(0.3, 0.3, 0.3, 0)))
-    print('BLEU-4: %f' % corpus_bleu(actual, predicted, weights=(0.25, 0.25, 0.25, 0.25)))
+def evaluate_bleu(actual_descr, predicted_descr):
+    # ref = [['the dogs are in the snow in front of fence'.split(), 'the dogs play on the snow'.split()]]
+    # cand = ['dog running in the snow'.split()]
+    # score = corpus_bleu(ref, cand, weights=(1.0, 0, 0, 0))
+
+    # references = []
+    # candidates = []
+
+    bleu_scores_over_all_1 = 0
+    bleu_scores_over_all_2 = 0
+    bleu_scores_over_all_3 = 0
+    bleu_scores_over_all_4 = 0
+
+    all_imgs_predicted = len(predicted_descr.items())
+
+    for img_id, captions in predicted_descr.items():
+
+        tmp_bleu_1 = 0
+        tmp_bleu_2 = 0
+        tmp_bleu_3 = 0
+        tmp_bleu_4 = 0
+
+        actual_desc_list = actual_descr[img_id]
+        references = [actual_desc.split() for actual_desc in actual_desc_list]
+
+        for candidate in captions:
+            candidate = candidate.split()
+            tmp_bleu_1 += sentence_bleu(references, candidate, weights=(1.0, 0, 0, 0))
+            tmp_bleu_2 += sentence_bleu(references, candidate, weights=(0.5, 0.5, 0, 0))
+            tmp_bleu_3 += sentence_bleu(references, candidate, weights=(0.3, 0.3, 0.3, 0))
+            tmp_bleu_4 += sentence_bleu(references, candidate, weights=(0.25, 0.25, 0.25, 0.25))
+
+        bleu_scores_over_all_1 += (tmp_bleu_1 / len(captions))
+        bleu_scores_over_all_2 += (tmp_bleu_2 / len(captions))
+        bleu_scores_over_all_3 += (tmp_bleu_3 / len(captions))
+        bleu_scores_over_all_4 += (tmp_bleu_4 / len(captions))
+
+        # calculate BLEU score
+    print('BLEU-1: %f' % (float(bleu_scores_over_all_1) / all_imgs_predicted))
+    print('BLEU-2: %f' % (float(bleu_scores_over_all_2) / all_imgs_predicted))
+    print('BLEU-3: %f' % (float(bleu_scores_over_all_3) / all_imgs_predicted))
+    print('BLEU-4: %f' % (float(bleu_scores_over_all_4) / all_imgs_predicted))
+
+
+def evaluate_gleu(actual_descr, predicted_descr):
+    # ref = [['the dogs are in the snow in front of fence'.split(), 'the dogs play on the snow'.split()]]
+    # cand = ['dog running in the snow'.split()]
+    # score = corpus_bleu(ref, cand, weights=(1.0, 0, 0, 0))
+
+    # references = []
+    # candidates = []
+
+    gleu_scores_over_all_1 = 0
+    gleu_scores_over_all_2 = 0
+    gleu_scores_over_all_3 = 0
+    gleu_scores_over_all_4 = 0
+
+    all_imgs_predicted = len(predicted_descr.items())
+
+    for img_id, captions in predicted_descr.items():
+
+        tmp_gleu_1 = 0
+        tmp_gleu_2 = 0
+        tmp_gleu_3 = 0
+        tmp_gleu_4 = 0
+
+        actual_desc_list = actual_descr[img_id]
+        references = [actual_desc.split() for actual_desc in actual_desc_list]
+
+        for candidate in captions:
+            candidate = candidate.split()
+            tmp_gleu_1 += sentence_bleu(references, candidate, weights=(1.0, 0, 0, 0))
+            tmp_gleu_2 += sentence_bleu(references, candidate, weights=(0.5, 0.5, 0, 0))
+            tmp_gleu_3 += sentence_bleu(references, candidate, weights=(0.3, 0.3, 0.3, 0))
+            tmp_gleu_4 += sentence_bleu(references, candidate, weights=(0.25, 0.25, 0.25, 0.25))
+
+        gleu_scores_over_all_1 += (tmp_gleu_1 / len(captions))
+        gleu_scores_over_all_2 += (tmp_gleu_2 / len(captions))
+        gleu_scores_over_all_3 += (tmp_gleu_3 / len(captions))
+        gleu_scores_over_all_4 += (tmp_gleu_4 / len(captions))
+
+        # calculate GLEU score
+    print('GLEU-1: %f' % (float(gleu_scores_over_all_1) / all_imgs_predicted))
+    print('GLEU-2: %f' % (float(gleu_scores_over_all_2) / all_imgs_predicted))
+    print('GLEU-3: %f' % (float(gleu_scores_over_all_3) / all_imgs_predicted))
+    print('GLEU-4: %f' % (float(gleu_scores_over_all_4) / all_imgs_predicted))
+
+
+# Flickr8k dataset
+def load_actual_desc_flickr(dataset_filename):
+    # load document
+    descriptions = dict()
+    with dataset_filename.open('r') as rf:
+        lines = rf.readlines()
+        for line in lines:
+            tokens = line.split(' ')
+            image_id, image_desc = tokens[0], tokens[1:]
+            if image_id not in descriptions:
+                descriptions[image_id] = list()
+                # wrap description in tokens
+            desc = ' '.join(image_desc)
+            # store
+            descriptions[image_id].append(desc)
+    return descriptions
+
+
+# Google dataset
+def load_actual_desc_google(dataset_filename):
+    # load document
+    descriptions = dict()
+    with dataset_filename.open('r') as rf:
+        lines = rf.readlines()
+        for line in lines:
+            tokens = line.split('\t')
+            image_id, image_desc = tokens[0], tokens[1]
+            if image_id not in descriptions:
+                image_desc = image_desc.split()
+                image_desc = [word.lower() for word in image_desc]
+                image_desc = [word for word in image_desc if len(word) > 1]
+                image_desc = [word for word in image_desc if word.isalpha()]
+                image_desc = ' '.join(image_desc)
+
+                descriptions[image_id] = image_desc
+
+    return descriptions
+
+
+def load_predicted_captions(captions_file):
+    captions = dict()
+    with captions_file.open('r') as rf:
+        lines = rf.readlines()
+        for line in lines:
+            tokens = line.strip().split(',')
+            image_id, image_desc = tokens[0], tokens[1:]
+            image_id = Path(image_id).stem
+            if image_id not in captions:
+                captions[image_id] = list()
+                # wrap description in tokens
+            for desc in image_desc:
+                captions[image_id].append(desc)
+    return captions
+
 
 
 
 if __name__ == '__main__':
+    print('Evaluate models')
+
+    # # Flickr8k dataset
+    #
+    true_descriptions_file = Path('C:\\akharche\\UserPreferenceAnalysis\\Image_Captioning\\!Results\\Flickr8k_eval\\Dataset_captions\\descriptions.txt')
+    predicted_captions_file = Path('C:\\akharche\\UserPreferenceAnalysis\\Image_Captioning\\!Results\\Flickr8k_eval\\google_inception_flickr8k_testset_captions.csv')
+
+    # Lists of descriptions
+    true_predictions = load_actual_desc_flickr(true_descriptions_file)
+    predicted_captions = load_predicted_captions(predicted_captions_file)
+
+    evaluate_bleu(true_predictions, predicted_captions)
+
+
+    # Google dataset
+    # true_descriptions_file = Path(
+    #     'C:\\Angelina_caption_generation\\!Results\\Google_eval\\Dataset_captions\\images_validation_map.csv')
+    # predicted_captions_file = Path(
+    #     'C:\\Angelina_caption_generation\\!Results\\Google_eval\\google_model_google_testset_captions.csv')
+    #
+    # # Lists of descriptions
+    # true_predictions = load_actual_desc_google(true_descriptions_file)
+    # print(true_predictions['0'])
+    # predicted_captions = load_predicted_captions(predicted_captions_file)
+    #
+    # evaluate_bleu(true_predictions, predicted_captions)
+
     # # prepare tokenizer on train set
 #     #
 #     # # load training dataset (6K)
@@ -198,13 +223,6 @@ if __name__ == '__main__':
 #     # file_to_save = Path('./Google_Test/google_test_predictions.csv')
 #     # get_desc(model, features, tokenizer, max_length, file_to_save)
 
-    data = [[0.1, 0.2, 0.3, 0.4, 0.5],
-            [0.5, 0.4, 0.3, 0.2, 0.1],
-            [0.1, 0.2, 0.3, 0.4, 0.5],
-            [0.5, 0.4, 0.3, 0.2, 0.1],
-            [0.1, 0.2, 0.3, 0.4, 0.5]]
-
-    beam_search_decoder(data)
 
 
 

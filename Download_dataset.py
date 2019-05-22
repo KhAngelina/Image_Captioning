@@ -17,10 +17,19 @@ def dataset_loading(path_to_data):
             yield i, row[0], row[1]
 
 def pics_mapping(path_to_data, data_gen):
+    all_images = Path('C:\\akharche\\UserPreferenceAnalysis\\Image_Captioning\\Data\\Google_dataset_test\\').glob('*.jpg')
+
+    imgs = [img.stem for img in all_images]
+    added = 0
     with path_to_data.open('w', encoding='utf-8') as fw:
         for i, descr, url in data_gen:
-            s = ('\t').join([str(i), url,  '\n'])
-            fw.write(s)
+            if added == 1005:
+                break
+
+            if str(i) in imgs:
+                added += 1
+                s = ('\t').join([str(i), descr,  '\n'])
+                fw.write(s)
 
 def load_url(url, timeout=10):
     with requests.get(url, timeout=timeout) as r:
@@ -75,6 +84,6 @@ if __name__ == '__main__':
 
     path_to_data = Path('./Google_dataset/Validation_GCC-1.1.0-Validation.tsv')
     data_gen = dataset_loading(path_to_data)
-    path_to_save = Path('./images_url_validation.csv')
+    path_to_save = Path('./images_validation_map.csv')
     pics_mapping(path_to_save, data_gen)
 
